@@ -1,3 +1,4 @@
+import argparse
 from datetime import datetime, timedelta, timezone
 import hashlib
 import json
@@ -23,7 +24,12 @@ codes = json.loads(response.text)
 codes = [item for item in codes if 'KRW' in item["market"]]
 
 #argparse로 채우기(ex. 'BTC','XRP')
-codes_manual = []
+parser = argparse.ArgumentParser(description='Argparse Tutorial')
+# argument는 원하는 만큼 추가한다.
+parser.add_argument('--banned', type=str, nargs='*',
+                    help='these codes are not traded')
+args = parser.parse_args()
+codes_manual = args.banned
 
 # 봇 매매 종목은 이 list of dict에서 관리
 codes_bot = []
@@ -80,7 +86,7 @@ def get_possible_krw():
     """거래에 사용할 금액"""
     possible = get_balance()
     possible = [float(item['balance']) for item in possible if item['currency']=='KRW'][0]
-    return max(100000.0, possible)+profit
+    return min(100000.0, possible)+profit
 
 # 매수 체크 함수들
 def get_minutes_candle(code, unit, count=1):
@@ -105,7 +111,8 @@ def get_new_nominates():
     nominates = json.loads(response.text)
     nominates = sorted(nominates, key=lambda nom:nom["acc_trade_price_24h"], reverse=True)
     # argument로 알려준 금지 종목은 취급하지 않음
-    nominates = [item for item in nominates if item["market"] not in codes_manual]
+    banned = [f"KRW-{item}" for item in codes_manual]
+    nominates = [item for item in nominates if item["market"] not in banned]
     return nominates[:25]
 
 def check_buyable(code):
@@ -121,6 +128,8 @@ def check_buyable(code):
 
 # 매수 주문
 def order_buy(code, current_price, krw):
+    global codes_bot
+    print(codes_bot)
     if len(codes_bot) >= BUY_LIMIT:
         return
     possible = get_possible_krw()/(BUY_LIMIT-len(codes_bot))
@@ -176,10 +185,12 @@ def order_sell(code):
 # 사놓은 애들 손절or 익절
 def check_earning():
     assets = get_balance()
+    global codes_bot
     codes_bot = [item for item in assets if item['currency'] not in codes_manual and item['currency'] != 'KRW']
     earning_map = {f"KRW-{item['currency']}":float(item['avg_buy_price']) for item in codes_bot}
-    markets = [f"KRW-{item['currency']}" for item in assets]   
+    markets = [f"KRW-{item['currency']}" for item in assets if item['currency'] not in codes_manual and item['currency'] != 'KRW']
     param_str = ",".join(markets)
+    print(f"pram_str : {param_str}")
     response = requests.request("GET", TICKER_URL, params={"markets":param_str})
     response = json.loads(response.text)
     for item in response:
@@ -199,3 +210,13 @@ def trade_by_threshold(earning_map):
             time.sleep(0.1)
             if ma3_price < ma6_price and ma3_volume < ma6_volume:
                 order_sell(code)
+
+#main
+krw = get_possible_krw()
+while(True):
+    for item in get_new_nominates():
+        time.sleep(1)
+        flag, target_price = check_buyable(item['market'])
+        if flag:
+            order_buy(item['market'],target_price,krw)
+    trade_by_threshold(check_earning())
