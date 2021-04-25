@@ -86,7 +86,7 @@ def get_possible_krw():
     """거래에 사용할 금액"""
     possible = get_balance()
     possible = [float(item['balance']) for item in possible if item['currency']=='KRW'][0]
-    return min(100000.0, possible)+profit
+    return min(2000000.0, possible)+profit
 
 # 매수 체크 함수들
 def get_minutes_candle(code, unit, count=1):
@@ -159,11 +159,13 @@ def order_buy(code, current_price, krw):
 def order_sell(code):
     name = code.split('-')[1]
     assets = get_balance()
-    if assets['currency'] == name:
-        amount = assets['balance']
+    for item in assets:
+        if item['currency'] == name:
+            amount = item['balance']
+    print(f"sell {code} of amount {amount}")
     query = {
 	'market': code,
-	'side': 'bid',
+	'side': 'ask',
 	'volume': amount,
 	'ord_type': 'market',
     }
@@ -181,6 +183,7 @@ def order_sell(code):
     authorize_token = f'Bearer {jwt_token}'
     headers = {"Authorization": authorize_token}
     res = requests.post(ORDER_URL, params=query, headers=headers)
+    print(f"sell res : {res.text}")
 
 # 사놓은 애들 손절or 익절
 def check_earning():
@@ -190,7 +193,9 @@ def check_earning():
     earning_map = {f"KRW-{item['currency']}":float(item['avg_buy_price']) for item in codes_bot}
     markets = [f"KRW-{item['currency']}" for item in assets if item['currency'] not in codes_manual and item['currency'] != 'KRW']
     param_str = ",".join(markets)
-    print(f"pram_str : {param_str}")
+    if param_str=='':
+        return {}
+    print(f"param_str : {param_str}")
     response = requests.request("GET", TICKER_URL, params={"markets":param_str})
     response = json.loads(response.text)
     for item in response:
@@ -200,9 +205,11 @@ def check_earning():
 
 def trade_by_threshold(earning_map):
     for code, rate in earning_map.items():
-        if rate < -abs(LOSS_LIMIT):
+        print(f"{code} : {rate}")
+        if rate*100 < -abs(LOSS_LIMIT):
+            print(f"{code} touch loss limit")
             order_sell(code)
-        if rate > abs(PROFIT_LIMIT):
+        if rate*100 > abs(PROFIT_LIMIT):
             ma3_candles = get_minutes_candle(code, 1, 3)
             ma3_price, ma3_volume = get_moving_average(ma3_candles)
             ma6_candles = get_minutes_candle(code, 1, 6)
