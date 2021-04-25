@@ -35,11 +35,13 @@ codes_manual = args.banned
 codes_bot = []
 BUY_LIMIT = 4
 
+# TODO
+# 체결 주문 확인해서 업데이트 필요
 profit = 0
 
 # 손절선, 익절선
-LOSS_LIMIT = 2.0
-PROFIT_LIMIT = 5.0
+LOSS_LIMIT = 1.5
+PROFIT_LIMIT = 3.0
 
 if not os.path.exists('logs'):
     os.makedirs('logs')
@@ -59,9 +61,10 @@ def printlog(message, *args):
     filename = datetime.utcnow().strftime('%y%m%d')
     with open ('logs/'+filename,'a') as f:
         #print(datetime.utcnow().strftime('[%m/%d %H:%M:%S]'), message, *args, file=f)
-        output = message
+        output = datetime.now().strftime('[%m/%d %H:%M:%S]') + ' '
+        output += message+' '
         for arg in args:
-            output += str(arg)
+            output += str(arg)+' '
         f.write(output + "\n")
 
 def dbgout(message):
@@ -86,7 +89,17 @@ def get_possible_krw():
     """거래에 사용할 금액"""
     possible = get_balance()
     possible = [float(item['balance']) for item in possible if item['currency']=='KRW'][0]
-    return min(2000000.0, possible)+profit
+    return min(2000000.0, possible)
+
+def get_current_krw():
+    """거래에 사용할 금액"""
+    possible = get_balance()
+    krw = [float(item['balance']) for item in possible if item['currency']=='KRW'][0]
+    for item in possible:
+        if item['currency'] != 'KRW':
+            krw -= float(item['balance'])*float(item['avg_buy_price'])
+    print(f'current possible krw : {krw}')
+    return max(0.0, krw)
 
 # 매수 체크 함수들
 def get_minutes_candle(code, unit, count=1):
@@ -113,7 +126,7 @@ def get_new_nominates():
     # argument로 알려준 금지 종목은 취급하지 않음
     banned = [f"KRW-{item}" for item in codes_manual]
     nominates = [item for item in nominates if item["market"] not in banned]
-    return nominates[:25]
+    return nominates[:20]
 
 def check_buyable(code):
     """3분봉이 양봉이고, 5분간 이동평균선 > 10분간 이동평균선이면 살만함"""
@@ -129,14 +142,19 @@ def check_buyable(code):
 # 매수 주문
 def order_buy(code, current_price, krw):
     global codes_bot
-    print(codes_bot)
-    if len(codes_bot) >= BUY_LIMIT:
+    print('### check what i have before buy')
+    already_have = [f"KRW-{item['currency']}" for item in codes_bot]
+    print(already_have)
+    if len(codes_bot) >= BUY_LIMIT or code in already_have:
+        print('already bought or full!')
         return
-    possible = get_possible_krw()/(BUY_LIMIT-len(codes_bot))
+    if krw == 0:
+        print('no possible money')
+        return
     query = {
 	'market': code,
 	'side': 'bid',
-	'volume': str(float(possible)/current_price),
+	'volume': str(float(krw)/current_price),
 	'price': current_price,
 	'ord_type': 'limit',
     }
@@ -154,6 +172,7 @@ def order_buy(code, current_price, krw):
     authorize_token = f'Bearer {jwt_token}'
     headers = {"Authorization": authorize_token}
     res = requests.post(ORDER_URL, params=query, headers=headers)
+    printlog(f"buy result : {res.text}")
 
 # 매도 주문
 def order_sell(code):
@@ -162,12 +181,12 @@ def order_sell(code):
     for item in assets:
         if item['currency'] == name:
             amount = item['balance']
-    print(f"sell {code} of amount {amount}")
+    printlog(f"sell {code} of amount {amount}")
     query = {
 	'market': code,
 	'side': 'ask',
 	'volume': amount,
-	'ord_type': 'market',
+        'ord_type': 'market', #매도는 시장가로 일괄
     }
     query_string = urlencode(query).encode()
     m = hashlib.sha512()
@@ -183,7 +202,7 @@ def order_sell(code):
     authorize_token = f'Bearer {jwt_token}'
     headers = {"Authorization": authorize_token}
     res = requests.post(ORDER_URL, params=query, headers=headers)
-    print(f"sell res : {res.text}")
+    printlog(f"sell result : {res.text}")
 
 # 사놓은 애들 손절or 익절
 def check_earning():
@@ -205,9 +224,9 @@ def check_earning():
 
 def trade_by_threshold(earning_map):
     for code, rate in earning_map.items():
-        print(f"{code} : {rate}")
+        printlog(f"{code} : {rate*100}")
         if rate*100 < -abs(LOSS_LIMIT):
-            print(f"{code} touch loss limit")
+            printlog(f"{code} touch loss limit")
             order_sell(code)
         if rate*100 > abs(PROFIT_LIMIT):
             ma3_candles = get_minutes_candle(code, 1, 3)
@@ -220,10 +239,12 @@ def trade_by_threshold(earning_map):
 
 #main
 krw = get_possible_krw()
+assets = get_balance()
+codes_bot = [item for item in assets if item['currency'] not in codes_manual and item['currency'] != 'KRW']
 while(True):
     for item in get_new_nominates():
         time.sleep(1)
         flag, target_price = check_buyable(item['market'])
         if flag:
-            order_buy(item['market'],target_price,krw)
+            order_buy(item['market'],target_price, get_current_krw()/BUY_LIMIT)
     trade_by_threshold(check_earning())
