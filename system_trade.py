@@ -98,6 +98,7 @@ def get_current_krw():
     assets = get_balance()
     codes_bot = [item for item in assets if item['currency'] not in codes_manual and item['currency'] != 'KRW']
     if len(codes_bot)==BUY_LIMIT:
+        printlog('List already full')
         return 0.0
     else:
         current = 0.0
@@ -154,8 +155,11 @@ def order_buy(code, current_price, krw):
     print('### check what i have before buy')
     already_have = [f"KRW-{item['currency']}" for item in codes_bot]
     print(already_have)
-    if len(codes_bot) >= BUY_LIMIT or code in already_have:
-        print('already bought or full!')
+    if len(codes_bot) >= BUY_LIMIT:
+        print('already full!')
+        return
+    if code in already_have:
+        print('already bought!')
         return
     if krw == 0:
         print('no possible money')
