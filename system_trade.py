@@ -40,8 +40,8 @@ BUY_LIMIT = 4
 profit = 0
 
 # 손절선, 익절선
-LOSS_LIMIT = 1.5
-PROFIT_LIMIT = 3.0
+LOSS_LIMIT = 2.0
+PROFIT_LIMIT = 4.0
 
 if not os.path.exists('logs'):
     os.makedirs('logs')
@@ -88,18 +88,27 @@ def get_balance():
 def get_possible_krw():
     """거래에 사용할 금액"""
     possible = get_balance()
+    print(possible)
     possible = [float(item['balance']) for item in possible if item['currency']=='KRW'][0]
     return min(2000000.0, possible)
 
 def get_current_krw():
     """거래에 사용할 금액"""
-    possible = get_balance()
-    krw = [float(item['balance']) for item in possible if item['currency']=='KRW'][0]
-    for item in possible:
-        if item['currency'] != 'KRW':
-            krw -= float(item['balance'])*float(item['avg_buy_price'])
-    print(f'current possible krw : {krw}')
-    return max(0.0, krw)
+    possible = get_possible_krw()
+    assets = get_balance()
+    codes_bot = [item for item in assets if item['currency'] not in codes_manual and item['currency'] != 'KRW']
+    if len(codes_bot)==BUY_LIMIT:
+        return 0.0
+    else:
+        current = 0.0
+        for item in codes_bot:
+            current += float(item['balance'])*float(item['avg_buy_price'])
+        if current >= possible:
+            return 0.0
+        else:
+            return possible/BUY_LIMIT
+
+    
 
 # 매수 체크 함수들
 def get_minutes_candle(code, unit, count=1):
@@ -207,6 +216,7 @@ def order_sell(code):
 # 사놓은 애들 손절or 익절
 def check_earning():
     assets = get_balance()
+    time.sleep(0.1)
     global codes_bot
     codes_bot = [item for item in assets if item['currency'] not in codes_manual and item['currency'] != 'KRW']
     earning_map = {f"KRW-{item['currency']}":float(item['avg_buy_price']) for item in codes_bot}
@@ -246,5 +256,5 @@ while(True):
         time.sleep(1)
         flag, target_price = check_buyable(item['market'])
         if flag:
-            order_buy(item['market'],target_price, get_current_krw()/BUY_LIMIT)
+            order_buy(item['market'],target_price, get_current_krw())
     trade_by_threshold(check_earning())
