@@ -33,7 +33,7 @@ codes_manual = args.banned
 
 # 봇 매매 종목은 이 list of dict에서 관리
 codes_bot = []
-BUY_LIMIT = 4
+BUY_LIMIT = 6
 
 # TODO
 # 체결 주문 확인해서 업데이트 필요
@@ -90,7 +90,7 @@ def get_possible_krw():
     possible = get_balance()
     print(possible)
     possible = [float(item['balance']) for item in possible if item['currency']=='KRW'][0]
-    return min(2000000.0, possible)
+    return min(3000000.0, possible)
 
 def get_current_krw():
     """거래에 사용할 금액"""
@@ -237,8 +237,16 @@ def check_earning():
     return earning_map
 
 def trade_by_threshold(earning_map):
+    balance = get_balance()
     for code, rate in earning_map.items():
-        printlog(f"{code} : {rate*100}")
+        for item in balance:
+            if f"KRW-{item['currency']}" == code:
+                param_str = f"KRW-{item['currency']}"
+                response = requests.request("GET", TICKER_URL, params={"markets":param_str})
+                response = json.loads(response.text)
+                amount = float(item['balance'])*float(response[0]['trade_price']) - float(item['balance'])*float(item['avg_buy_price'])
+                time.sleep(0.2)
+        printlog(f"{code} : {rate*100} - amount is {amount}")
         if rate*100 < -abs(LOSS_LIMIT):
             printlog(f"{code} touch loss limit")
             order_sell(code)
